@@ -215,9 +215,11 @@ async function handleImageUpload(event) {
     loadingText.style.display = 'block';
     progressFill.style.width = '0%';
     let newImages = [];
-    for (let i = 0; i < files.length; i++) {
-        try {
-            // Redimensionar la imagen antes de subirla (opcional, puedes quitar si quieres el archivo original)
+    // --- NUEVO: Subir todas las imágenes en un solo FormData si hay más de una ---
+    if (files.length > 1) {
+        const formData = new FormData();
+        for (let i = 0; i < files.length; i++) {
+            // Redimensionar la imagen antes de subirla (opcional)
             const resizedDataUrl = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -226,27 +228,54 @@ async function handleImageUpload(event) {
                 reader.onerror = () => reject(new Error('Error leyendo la imagen.'));
                 reader.readAsDataURL(files[i]);
             });
-            // Convertir base64 a Blob
+            const blob = await (await fetch(resizedDataUrl)).blob();
+            formData.append('images', blob, files[i].name);
+            progressFill.style.width = `${((i + 1) / files.length) * 100}%`;
+        }
+        // Subir todas las imágenes al backend de Render
+        const response = await fetch('https://backend-savq.onrender.com', {
+            method: 'POST',
+            body: formData
+        });
+        if (!response.ok) throw new Error('Error subiendo las imágenes al backend');
+        const data = await response.json();
+        // data.urls es un array de URLs
+        newImages = data.urls.map((url, idx) => ({
+            src: url,
+            index: imagesData.length + idx + 1,
+            description: '',
+            status: ''
+        }));
+    } else {
+        // Subida individual (una sola imagen)
+        try {
+            const resizedDataUrl = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    resizeImage(e.target.result, 1024, resolve);
+                };
+                reader.onerror = () => reject(new Error('Error leyendo la imagen.'));
+                reader.readAsDataURL(files[0]);
+            });
             const blob = await (await fetch(resizedDataUrl)).blob();
             const formData = new FormData();
-            formData.append('image', blob, files[i].name);
-            // Subir al backend
-            const response = await fetch('http://localhost:4000/api/upload', {
+            formData.append('image', blob, files[0].name);
+            const response = await fetch('https://backend-savq.onrender.com/api/upload', {
                 method: 'POST',
                 body: formData
             });
             if (!response.ok) throw new Error('Error subiendo la imagen al backend');
             const data = await response.json();
             newImages.push({
-                src: data.url, // URL del backend
-                index: imagesData.length + newImages.length + 1,
+                src: data.url,
+                index: imagesData.length + 1,
                 description: '',
                 status: ''
             });
         } catch (err) {
             console.error('Error procesando/subiendo imagen:', err);
         }
-        progressFill.style.width = `${((i + 1) / files.length) * 100}%`;
+        progressFill.style.width = '100%';
     }
     imagesData.push(...newImages);
     renderGrid();
